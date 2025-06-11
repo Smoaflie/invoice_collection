@@ -261,17 +261,20 @@ def batch_process(entries: List[dict]):
 # 使用示例
 if __name__ == "__main__":
     # 1 从收集表中拉取发票信息
-    print("从收集表中拉取所有记录...")
+    print("\n正在从收集表中拉取所有记录...")
     records = fetch_records(token, table_id)
-    print(f"成功拉取{len(records)}条发票信息")
+    print(
+        f"成功拉取{len(records)}条记录，共{sum([len(i["invoices_list"]) for i in records])}张发票"
+    )
 
     # 2 从记录中提取发票信息
-    print("从记录中提取发票信息")
+    print("\n正在从记录中提取发票信息...")
     result = batch_process(records)
+    print(f"成功提取{sum([len(i["invoices_list"]) for i in records])}张发票信息")
 
     # 3 保存结果
     result_file_path = "result.json"
-    print(f"保存结果到{result_file_path}")
+    print(f"\n将保存结果到{result_file_path}")
     with open(result_file_path, "w", encoding="gbk", errors="replace") as f:
         f.write(
             ujson.dumps(
@@ -280,11 +283,11 @@ if __name__ == "__main__":
         )
 
     # 4 根据发票金额修改表格内"金额"栏
-    print('根据发票金额修改表格内"金额"栏...')
+    print('\n正在根据发票金额修改飞书表格内"金额"栏...')
     update_price(result)
 
     # 5 去重
-    print("检测去重项...")
+    print("正在检测去重项...")
     duplicates, sum = vertify_duplicates(result)
     if sum:
         print("发现重复项，数量:", sum)
@@ -298,3 +301,5 @@ if __name__ == "__main__":
                     escape_forward_slashes=False,
                 )
             )
+    else:
+        print("没有发现重复项")
