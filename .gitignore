@@ -11,3 +11,6 @@ Database
 *.csv
 *.db
 *.txt
+
+.env
+*.xlsx
