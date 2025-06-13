@@ -2,10 +2,11 @@
 from dotenv import load_dotenv
 
 load_dotenv()
+print("飞书sdk模块初始需要较长时间，请耐心等待...")
 
 import base64
-import lark_oapi as lark
 from core import *
+import lark_oapi as lark
 from lark_oapi.api.bitable.v1 import *
 from lark_oapi.api.drive.v1 import *
 from sqlite_utils import Database
@@ -17,9 +18,10 @@ from custom_rule import vertify_invoice
 
 APP_TOKEN = "GOvAbKyv3aOot1sy9emcTmpdn6d"
 TABLE_ID = "tblgP75665t0WrOQ"
+INVOICE_COLUMN_NAME = "发票"
 TOTAL_AMOUNT_COLUMN_NAME = "审批后金额"
 APPROVAL_REMARKS_COLUMN_NAME = "审批备注"
-db = Database("chickens.db")
+db = Database("invoices.db")
 
 # TODO: 对表格的自定义规则
 # TODO: 标签系统(同自定义规则)
@@ -36,11 +38,11 @@ def main():
         client = lark.Client.builder() \
             .app_id(lark.APP_ID) \
             .app_secret(lark.APP_SECRET) \
-            .log_level(lark.LogLevel.DEBUG) \
+            .log_level(lark.LogLevel.INFO) \
             .build()
         spinner.ok("✅ Done")
 
-    logger.info("Starting to fetch records from the table...")
+    logger.info("Fetching records from the table...")
     with yaspin(text="", spinner="dots") as spinner:
         page_token = ""
         while True:
@@ -67,6 +69,7 @@ def main():
             } for record in response.data.items]
             lark.logger.debug(
                 f"Fetched {len(records)} records from the table.")
+            db['records'].delete_where("uid LIKE ?", (f"{TABLE_ID}_%", ))
             db["records"].insert_all(records,
                                      pk="uid",
                                      replace=True,
@@ -77,26 +80,23 @@ def main():
             page_token = response.data.page_token
         spinner.ok("✅ Done")
 
-    logger.info("Starting to collect invoices files...")
+    logger.info("Processing invoice files...")
+    logger.info("Using Baidu OCR API")
     with yaspin(text="", spinner="dots") as spinner:
-        result = db.execute("""
+        logger.info("Collecting invoices files...")
+        result = db.execute(f"""
             SELECT
                 records.uid,
                 json_extract(value, '$.file_token') AS file_token,
                 json_extract(value, '$.type') AS type
-            FROM records, json_each(records.发票)
+            FROM records, json_each(records.{INVOICE_COLUMN_NAME})
         """).fetchall()
         invoice_files = [{
             "record_uid": row[0],
             "file_token": row[1],
             "type": row[2],
         } for row in result]
-        spinner.ok("✅ Done")
 
-    logger.info("Processing invoice files..., total number: %d",
-                len(invoice_files))
-    logger.info("Using Baidu OCR API")
-    with yaspin(text="", spinner="dots") as spinner:
         for invoice_file in tqdm(invoice_files, desc="Processing invoices"):
             if "invoices" in db.table_names():
                 row = next(
@@ -134,7 +134,12 @@ def main():
                     )
 
                 # Prepare the data for the OCR API
-                ocr_result = BaiduOCR.invoice_recognition("pdf", base64_data)
+                if "image" in invoice_file['type']:
+                    ocr_result = BaiduOCR.vat_invoice_recognition(
+                        "image", base64_data)
+                elif "pdf" in invoice_file['type']:
+                    ocr_result = BaiduOCR.vat_invoice_recognition(
+                        "pdf", base64_data)
 
                 if (not ocr_result.number or not ocr_result.totalAmount):
                     raise ValueError(
@@ -243,10 +248,10 @@ def main():
         for record in tqdm(records_in_current_table,
                            desc="Generating records to update."):
             result = db.execute(
-                """
+                f"""
                 SELECT 
                     json_extract(value, '$.file_token') AS file_token
-                FROM records, json_each(records.发票)
+                FROM records, json_each(records.{INVOICE_COLUMN_NAME})
                 WHERE records.uid = ?
             """, (record['uid'], )).fetchall()
             invoice_files_token = [row[0] for row in result]

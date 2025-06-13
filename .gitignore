@@ -13,4 +13,4 @@ Database
 *.txt
 
 .env
-*.xlsx
+bak
