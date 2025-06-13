@@ -38,95 +38,47 @@ class BaiduOCR(object):
         BaiduOCR.access_token = response.json().get("access_token", None)
 
     @staticmethod
-    def vat_invoice_recognition(file_type: str, base64_data) -> Invoice:
-        """
-        增值税发票识别
+    def parse_vat_invoice(results):
 
-        doc: https://cloud.baidu.com/doc/OCR/s/nk3h7xy2t
-        """
-        if not BaiduOCR.access_token:
-            BaiduOCR.refresh_access_token()
-
-        url = f"https://aip.baidubce.com/rest/2.0/ocr/v1/vat_invoice?access_token={BaiduOCR.access_token}"
-        headers = {
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Accept": "application/json",
-        }
-
-        results = []
-        if file_type == "pdf":
-            pdf_page_max = float("inf")
-            pdf_page = 1
-            while pdf_page < pdf_page_max:
-                payload = f"pdf_file={urllib.parse.quote_plus(base64_data)}&pdf_file_num={pdf_page}&seal_tag=false"
-                response = requests.request("POST",
-                                            url,
-                                            headers=headers,
-                                            data=payload.encode("utf-8"))
-                page = response.json()
-
-                pdf_page += 1
-                pdf_page_max = min(pdf_page_max,
-                                   int(page.get("pdf_file_size")))
-                results.append(page["words_result"])
-        elif file_type == "image":
-            payload = f"image={urllib.parse.quote_plus(base64_data)}&seal_tag=false"
-            response = requests.request("POST",
-                                        url,
-                                        headers=headers,
-                                        data=payload.encode("utf-8"))
-            page = response.json()
-
-            results.append(page["words_result"])
-        elif file_type == "ofd":
-            pass
+        def extract_param(data, key):
+            items = data.get(key, "")
+            if isinstance(items, list) and len(items) > 0 and isinstance(
+                    items[0], dict):
+                return items[0].get("word", "")
+            else:
+                return items
 
         invoice = Invoice()
-        try:
-            invoice.set_field('type', results[0].get("InvoiceType"))
-        except StopIteration or ValueError:
-            if results[0].get("InvoiceType"):
-                raise ValueError(
-                    f"Unkown invoice type {{{results[0].get('InvoiceType')}}}")
-            else:
-                raise ValueError(
-                    f"BaiduApi parse error. Lack of necessary parameters.")
 
-        invoice.set_field("province", results[-1].get("Province", ""))
-        invoice.set_field("city", results[-1].get("City", ""))
-        invoice.set_field("code", results[-1].get("InvoiceCode", ""))
-        invoice.set_field("number", results[-1].get("InvoiceNum", ""))
-        invoice.set_field("date", results[-1].get("InvoiceDate", ""))
-        invoice.set_field("machineCode", results[-1].get("MachineCode", ""))
-        invoice.set_field("password", results[-1].get("Password", ""))
-        invoice.set_field("verificationCode", results[-1].get("CheckCode", ""))
-
-        invoice.set_field("totalAmount",
-                          results[-1].get("AmountInFiguers", ""))
-        invoice.set_field("amount", results[-1].get("TotalAmount", ""))
-        invoice.set_field("taxAmount", results[-1].get("TotalTax", ""))
-
-        invoice.set_field("sellerTaxID",
-                          results[-1].get("SellerRegisterNum", ""))
-        invoice.set_field("sellerName", results[-1].get("SellerName", ""))
-        invoice.set_field("sellerAddress",
-                          results[-1].get("SellerAddress", ""))
-        invoice.set_field("sellerBankAccount",
-                          results[-1].get("SellerBank", ""))
-
-        invoice.set_field("buyerTaxID",
-                          results[-1].get("PurchaserRegisterNum", ""))
-        invoice.set_field("buyerName", results[-1].get("PurchaserName", ""))
-        invoice.set_field("buyerAddress",
-                          results[-1].get("PurchaserAddress", ""))
-        invoice.set_field("buyerBankAccount",
-                          results[-1].get("PurchaserBank", ""))
-
-        invoice.set_field("payee", results[-1].get("Payee", ""))
-        invoice.set_field("reviewer", "")
-        invoice.set_field("noteDrawer", results[-1].get("NoteDrawer", ""))
-        invoice.set_field("remark", results[-1].get("Remarks", ""))
-        invoice.set_field("crc", results[-1].get("CheckCode", ""))
+        params_dict = {
+            'type': 'InvoiceType',
+            'province': 'Province',
+            'city': 'City',
+            'code': 'InvoiceCode',
+            'number': 'InvoiceNum',
+            'date': 'InvoiceDate',
+            'machineCode': 'MachineCode',
+            'password': 'Password',
+            'verificationCode': 'CheckCode',
+            'totalAmount': 'AmountInFiguers',
+            'amount': 'TotalAmount',
+            'taxAmount': 'TotalTax',
+            'sellerTaxID': 'SellerRegisterNum',
+            'sellerName': 'SellerName',
+            'sellerAddress': 'SellerAddress',
+            'sellerBankAccount': 'SellerBank',
+            'buyerTaxID': 'PurchaserRegisterNum',
+            'buyerName': 'PurchaserName',
+            'buyerAddress': 'PurchaserAddress',
+            'buyerBankAccount': 'PurchaserBank',
+            'payee': 'Payee',
+            'reviewer': 'reviewer',
+            'noteDrawer': 'NoteDrawer',
+            'remark': 'Remarks',
+            'crc': 'CheckCode',
+        }
+        for field, key in params_dict.items():
+            invoice.set_field(field, extract_param(results[-1], key))
 
         all_lists = (
             "CommodityName",
@@ -226,6 +178,9 @@ class BaiduOCR(object):
                 ))
             invoice.add_item(item)
 
+        if not invoice._items:
+            raise ValueError("No items found in the invoice.")
+
         item_tag = re.findall(r"\*\S+\*", invoice._items[0].name)
 
         invoice.set_field("item_tag", item_tag[0] if item_tag else "")
@@ -237,3 +192,138 @@ class BaiduOCR(object):
         invoice.set_field("total_items_num",
                           sum(item.num for item in invoice._items))
         return invoice
+
+    @staticmethod
+    def parse_train_ticket(results):
+
+        def extract_param(data, key):
+            items = data.get(key, "")
+            if isinstance(items, list) and len(items) > 0 and isinstance(
+                    items[0], dict):
+                return items[0].get("word", "")
+            else:
+                return items
+
+        invoice = Invoice()
+
+        invoice.set_field('type', "电子发票（铁路电子客票）")
+        invoice.set_field('number', extract_param(results[-1], 'invoice_num'))
+        invoice.set_field('date', extract_param(results[-1], 'date'))
+        invoice.set_field('buyerName',
+                          extract_param(results[-1], 'purchaser_name'))
+        invoice.set_field('buyerTaxID',
+                          extract_param(results[-1], 'purchaser_register_num'))
+
+        price = extract_param(results[-1], 'ticket_rates')
+        price_value = re.search(r"\d+(?:\.\d+)?", price).group()
+        invoice.set_field('totalAmount', price_value)
+
+        remark = (f"电子客票号: {extract_param(results[-1], 'elec_ticket_num')}, "
+                  f"始发站: {extract_param(results[-1], 'starting_station')}, "
+                  f"终点站: {extract_param(results[-1], 'destination_station')}, "
+                  f"乘车人: {extract_param(results[-1], 'name')}, "
+                  f"车次: {extract_param(results[-1], 'train_num')}, "
+                  f"发车时间: {extract_param(results[-1], 'time')}, "
+                  f"座次: {extract_param(results[-1], 'seat_num')}, "
+                  f"座位类型: {extract_param(results[-1], 'seat_category')}, ")
+        invoice.set_field('remark', remark)
+
+        return invoice
+
+    @staticmethod
+    def vat_invoice_recognition(file_type: str, base64_data) -> Invoice:
+        """
+        增值税发票识别
+
+        doc: https://cloud.baidu.com/doc/OCR/s/nk3h7xy2t
+        """
+        if not BaiduOCR.access_token:
+            BaiduOCR.refresh_access_token()
+
+        url = f"https://aip.baidubce.com/rest/2.0/ocr/v1/vat_invoice?access_token={BaiduOCR.access_token}"
+        headers = {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json",
+        }
+
+        results = []
+        if file_type == "pdf":
+            pdf_page_max = float("inf")
+            pdf_page = 1
+            while pdf_page < pdf_page_max:
+                payload = f"pdf_file={urllib.parse.quote_plus(base64_data)}&pdf_file_num={pdf_page}&seal_tag=false"
+                response = requests.request("POST",
+                                            url,
+                                            headers=headers,
+                                            data=payload.encode("utf-8"))
+                page = response.json()
+
+                pdf_page += 1
+                pdf_page_max = min(pdf_page_max,
+                                   int(page.get("pdf_file_size")))
+                results.append(page["words_result"])
+        elif file_type == "image":
+            payload = f"image={urllib.parse.quote_plus(base64_data)}&seal_tag=false"
+            response = requests.request("POST",
+                                        url,
+                                        headers=headers,
+                                        data=payload.encode("utf-8"))
+            page = response.json()
+
+            results.append(page["words_result"])
+        elif file_type == "ofd":
+            pass
+
+        return BaiduOCR.parse_vat_invoice(results)
+
+    @staticmethod
+    def multiple_invoice_recognition(file_type: str, base64_data) -> Invoice:
+        """
+        智能财务票据识别
+
+        doc: https://cloud.baidu.com/doc/OCR/s/7ktb8md0j
+        """
+        if not BaiduOCR.access_token:
+            BaiduOCR.refresh_access_token()
+
+        url = f"https://aip.baidubce.com/rest/2.0/ocr/v1/multiple_invoice?access_token={BaiduOCR.access_token}"
+        headers = {
+            "Content-Type": "application/x-www-form-urlencoded",
+        }
+
+        results = []
+        invoice_type = ""
+        if file_type == "pdf":
+            pdf_page_max = float("inf")
+            pdf_page = 1
+            while pdf_page < pdf_page_max:
+                payload = f"pdf_file={urllib.parse.quote_plus(base64_data)}&pdf_file_num={pdf_page}&seal_tag=false"
+                response = requests.request("POST",
+                                            url,
+                                            headers=headers,
+                                            data=payload.encode("utf-8"))
+                page = response.json()
+
+                pdf_page += 1
+                pdf_page_max = min(pdf_page_max,
+                                   int(page.get("pdf_file_size")))
+                invoice_type = page['words_result'][0]['type']
+                results.append(page["words_result"][0]['result'])
+        elif file_type == "image":
+            payload = f"image={urllib.parse.quote_plus(base64_data)}&seal_tag=false"
+            response = requests.request("POST",
+                                        url,
+                                        headers=headers,
+                                        data=payload.encode("utf-8"))
+            page = response.json()
+            invoice_type = page['words_result'][0]['type']
+            results.append(page["words_result"][0]['result'])
+        elif file_type == "ofd":
+            pass
+
+        if invoice_type == "vat_invoice":
+            return BaiduOCR.parse_vat_invoice(results)
+        elif invoice_type == "train_ticket":
+            return BaiduOCR.parse_train_ticket(results)
+        else:
+            raise ValueError(f"Unkown invoice type {{{invoice_type}}}")
