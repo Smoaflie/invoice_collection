@@ -1,16 +1,11 @@
 __pycache__
-cache
-*.json
-test.py
-*.zip
-*.pdf
-output*
-Database
+
+.env
 
 *.log
 *.csv
 *.db
 *.txt
+*.xlsx
 
-.env
-bak
+bak 
