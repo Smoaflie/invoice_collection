@@ -899,13 +899,13 @@ def auto_sync(table_url: str, db_path: str = "invoices.db"):
 
     logger.info(
         "Comparing local and remote revision to determine sync direction.")
+    remote_revision = 0
+    local_record_revision = 0
+    result = ""
     with yaspin(text="", spinner="dots") as spinner:
-        remote_revision = ""
-        local_record_revision = ""
-        result = ""
-
         # fetch remote revision
         def fetch_remote_revision():
+            remote_revision = ""
             page_token = ""
             while remote_revision == "":
                 request: bitable_v1.ListAppTableRequest = bitable_v1.ListAppTableRequest.builder() \
@@ -919,7 +919,7 @@ def auto_sync(table_url: str, db_path: str = "invoices.db"):
                     lark.logger.error(
                         f"client.bitable.v1.app_table.list failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}, resp: \n{json.dumps(json.loads(response.raw.content), indent=4, ensure_ascii=False)}"
                     )
-                    return
+                    return 0
 
                 table_info = next(
                     (table_info for table_info in response.data.items
@@ -936,6 +936,8 @@ def auto_sync(table_url: str, db_path: str = "invoices.db"):
         try:
             local_record_revision = db['remote_table_revision'].get(
                 lark_bitable_table_id).get('value')
+            if not local_record_revision:
+                local_record_revision = 0
         except Exception:
             db['remote_table_revision'].insert(
                 {
@@ -947,7 +949,7 @@ def auto_sync(table_url: str, db_path: str = "invoices.db"):
         logger.debug(f'local_record_revision is {local_record_revision}')
 
         # compare local and remote revision
-        if local_record_revision > remote_revision:
+        if local_record_revision >= remote_revision:
             result = "sync_to_table"
         else:
             result = "sync_from_table"
@@ -966,6 +968,32 @@ def auto_sync(table_url: str, db_path: str = "invoices.db"):
         sync_from_table(table_url, db_path)
         db['remote_table_revision'].update(lark_bitable_table_id,
                                            {"value": remote_revision})
+
+
+def group_invoices(file_path, db_path: str = "invoices.db"):
+    db = Database(db_path)
+
+    logger.info('Parsing target file.')
+    with yaspin(text="", spinner="dots") as spinner:
+        with open(file_path, 'r') as f:
+            request = json.loads(f.read())
+        try:
+            key: str = request['key']
+            target: dict = request['target']
+            if not isinstance(key, str) or not isinstance(target, dict):
+                raise ValueError('key or target has wrong type.')
+        except Exception:
+            logger.exception("传入的参数文件格式错误，请检查 JSON 格式或字段内容")
+
+        spinner.ok("✅ Done")
+
+    logger.info('Updating invoices data.')
+    with yaspin(text="", spinner="dots") as spinner:
+        for key_word, status in target.items():
+            db.execute(f"UPDATE invoices SET status = ? WHERE {key} = ?",
+                       (status, key_word))
+        db.conn.commit()
+        spinner.ok("✅ Done")
 
 
 def main():
@@ -1031,6 +1059,14 @@ def main():
                                 default="invoices.db",
                                 help="SQLite 数据库路径")
 
+    # 子命令：group
+    group_parser = subparsers.add_parser("group",
+                                         help="解析给定的json文件,设置发票的status")
+    group_parser.add_argument("target", help="必填参数：指定处理目标，例如 'group.json'")
+    group_parser.add_argument("--db",
+                              default="invoices.db",
+                              help="SQLite 数据库路径")
+
     args = parser.parse_args()
 
     if args.command == "fetch":
@@ -1048,6 +1084,8 @@ def main():
         create_lark_app_table(args.url, args.db)
     elif args.command == "recheck":
         recheck_invoices(args.db)
+    elif args.command == "group":
+        group_invoices(args.target, args.db)
 
 
 if __name__ == "__main__":
