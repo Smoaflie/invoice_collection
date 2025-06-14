@@ -5,12 +5,12 @@ load_dotenv()
 
 import argparse
 import base64
-from datetime import datetime
 import json
-import re
 from core import *
 from core.invoice import Invoice
+from core.log import LogLevel
 from core.invoice.baidu_ocr import BaiduOCR
+from core.utils import extract_params_from_url, extract_text
 from sqlite_utils import Database
 from tqdm import tqdm
 from yaspin import yaspin
@@ -22,6 +22,33 @@ INVOICE_COLUMN_NAME = "发票"
 TOTAL_AMOUNT_COLUMN_NAME = "审批后金额"
 APPROVAL_REMARKS_COLUMN_NAME = "审批备注"
 
+LARK_LOG_LEVEL = LogLevel.INFO
+
+# TODO: 读取json格式文件，将发票信息分组
+
+table_fields_type_map = {
+    "file_token": 1,  # 文本类型
+    "uploader": 11,  # 人员
+    "belonger": 11,  # 人员
+    "type": 1,  # 文本类型
+    "number": 1,  # 文本类型
+    "date": 1,  # 文本类型
+    "buyerName": 1,  # 文本类型
+    "buyerTaxID": 1,  # 文本类型
+    "sellerName": 1,  # 文本类型
+    "sellerTaxID": 1,  # 文本类型
+    "items_brief": 1,  # 文本类型
+    "totalAmount": 2,  # 数字类型
+    "error_message": 1,  # 文本类型
+    "remark": 1,  # 文本类型
+    "items": 1,  # 文本类型
+    "item_num": 2,  # 数字类型
+    "total_items_num": 2,  # 数字类型
+    "items_unit": 1,  # 文本类型
+    "status": 3,  # 状态类型
+    # 状态类型: 0 - 待处理, -1 - 存在错误(解析错误/发票重复), -2 - 未通过自定义校验, 其余 - 自定义
+}
+
 
 def process_invoice_with_ocr(client, file_token: str, file_type: str,
                              base64_data: str, use_fallback: bool,
@@ -29,6 +56,7 @@ def process_invoice_with_ocr(client, file_token: str, file_type: str,
     import lark_oapi as lark
     import lark_oapi.api.drive.v1 as drive_v1
     client: lark.Client = client
+    print(1)
 
     def perform_ocr(method: str):
         if "image" in file_type:
@@ -47,10 +75,10 @@ def process_invoice_with_ocr(client, file_token: str, file_type: str,
                 return row["file_token"]
         return None
 
-    def insert_result(data: dict, error: str = None):
+    def insert_result(data: dict, processed: bool, error: str = None):
         record = {
             **data, "file_token": file_token,
-            "processed": error is None,
+            "processed": processed,
             "error_message": error,
             "status": '0' if error is None else '-1'
         }
@@ -87,10 +115,10 @@ def process_invoice_with_ocr(client, file_token: str, file_type: str,
         if duplicate_token:
             msg = f"This file has been processed in file_token: {duplicate_token}"
             logger.debug(msg)
-            insert_result(ocr_result.data, msg)
+            insert_result(ocr_result.data, True, msg)
             return
 
-        insert_result(ocr_result.data)
+        insert_result(ocr_result.data, True)
         logger.debug(f"Processed file {file_token} successfully.")
 
     except Exception as e:
@@ -109,10 +137,10 @@ def process_invoice_with_ocr(client, file_token: str, file_type: str,
                 if duplicate_token:
                     msg = f"This file has been processed in file_token: {duplicate_token}"
                     logger.debug(msg)
-                    insert_result(ocr_result.data, msg)
+                    insert_result(ocr_result.data, True, msg)
                     return
 
-                insert_result(ocr_result.data)
+                insert_result(ocr_result.data, True)
                 logger.debug(
                     f"Processed file {file_token} successfully (fallback).")
 
@@ -121,28 +149,21 @@ def process_invoice_with_ocr(client, file_token: str, file_type: str,
                     f"File {file_token} could not be processed with primary OCR and fallback: {e}.\nPlease check the file: {get_file_tmp_download_url(file_token)}"
                 )
                 error_msg = f"Fallback OCR failed: {e}"
-                insert_result({}, error_msg)
+                insert_result({}, False, error_msg)
         else:
             logger.error(
                 f"File {file_token} could not be processed with primary OCR and fallback is disabled: {e}.\nPlease check the file: {get_file_tmp_download_url(file_token)}"
             )
             error_msg = f"This file cannot be processed: {e}"
-            insert_result({}, error_msg)
+            insert_result({}, False, error_msg)
 
 
 def fetch_from_table(table_url: str,
                      db_path: str = "invoices.db",
                      use_fallback: bool = False):
     db = Database(db_path)
-    match = re.search(r'/base/([a-zA-Z0-9]+)\?table=([a-zA-Z0-9]+)', table_url)
-    if match:
-        lark_bitable_app_token = match.group(1)
-        lark_bitable_table_id = match.group(2)
-        logger.debug("app_id =", lark_bitable_app_token)
-        logger.debug("lark_bitable_table_id =", lark_bitable_table_id)
-    else:
-        logger.error("Invalid Lark Bitable URL format.")
-        return
+    lark_bitable_app_token, lark_bitable_table_id = extract_params_from_url(
+        table_url)
 
     logger.info("Creating client for Lark API.")
     with yaspin(text="", spinner="dots") as spinner:
@@ -159,7 +180,7 @@ def fetch_from_table(table_url: str,
         client = lark.Client.builder() \
             .app_id(lark.APP_ID) \
             .app_secret(lark.APP_SECRET) \
-            .log_level(lark.LogLevel.INFO) \
+            .log_level(LARK_LOG_LEVEL) \
             .build()
         spinner.ok("✅ Done")
 
@@ -438,41 +459,12 @@ def export_to_local_document(db_path: str = "invoices.db",
     logger.info(f"All tables exported to {output_path}.")
 
 
-def create_lark_app_table_(table_url: str, db_path: str = "invoices.db"):
+def create_lark_app_table(table_url: str, db_path: str = "invoices.db"):
     """
     (飞书)创建展示发票信息的数据表
     """
     db = Database(db_path)
-    match = re.search(r'/base/([a-zA-Z0-9]+)', table_url)
-    if match:
-        lark_bitable_app_token = match.group(1)
-        logger.debug("app_id =", lark_bitable_app_token)
-    else:
-        logger.error("Invalid Lark Bitable URL format.")
-        return
-
-    fields_type_map = {
-        "file_token": 1,  # 文本类型
-        "uploader": 11,  # 人员
-        "belonger": 11,  # 人员
-        "type": 1,  # 文本类型
-        "number": 1,  # 文本类型
-        "date": 1,  # 文本类型
-        "buyerName": 1,  # 文本类型
-        "buyerTaxID": 1,  # 文本类型
-        "sellerName": 1,  # 文本类型
-        "sellerTaxID": 1,  # 文本类型
-        "items_brief": 1,  # 文本类型
-        "totalAmount": 2,  # 数字类型
-        "error_message": 1,  # 文本类型
-        "remark": 1,  # 文本类型
-        "items": 1,  # 文本类型
-        "item_num": 2,  # 数字类型
-        "total_items_num": 2,  # 数字类型
-        "items_unit": 1,  # 文本类型
-        "status": 3,  # 状态类型
-        # 状态类型: 0 - 待处理, -1 - 存在错误(解析错误/发票重复), -2 - 未通过自定义校验, 其余 - 自定义
-    }
+    lark_bitable_app_token, _ = extract_params_from_url(table_url)
 
     logger.info("Creating client for Lark API.")
     with yaspin(text="", spinner="dots") as spinner:
@@ -489,7 +481,7 @@ def create_lark_app_table_(table_url: str, db_path: str = "invoices.db"):
         client = lark.Client.builder() \
             .app_id(lark.APP_ID) \
             .app_secret(lark.APP_SECRET) \
-            .log_level(lark.LogLevel.INFO) \
+            .log_level(LARK_LOG_LEVEL) \
             .build()
         spinner.ok("✅ Done")
 
@@ -516,7 +508,7 @@ def create_lark_app_table_(table_url: str, db_path: str = "invoices.db"):
                                         "name": "0"
                                     },
                                 ]}).build())
-                             for field_name, type_value in fields_type_map.items()
+                             for field_name, type_value in table_fields_type_map.items()
                         ])
                     .build())
                 .build()) \
@@ -550,7 +542,7 @@ def create_lark_app_table_(table_url: str, db_path: str = "invoices.db"):
 
         # format all invoices data
         for invoice_data in invoices_data:
-            for key, type_value in fields_type_map.items():
+            for key, type_value in table_fields_type_map.items():
                 if key in invoice_data:
                     value = invoice_data[key]
 
@@ -641,19 +633,13 @@ def recheck_invoices(db_path: str = "invoices.db"):
         spinner.ok("✅ Done")
 
 
-def update_from_table(table_url: str,
-                      db_path: str = "invoices.db",
-                      use_fallback: bool = False):
+def sync_from_table(table_url: str, db_path: str = "invoices.db"):
+    """
+    同步数据 方向 本地数据库<-远程云文档
+    """
     db = Database(db_path)
-    match = re.search(r'/base/([a-zA-Z0-9]+)\?table=([a-zA-Z0-9]+)', table_url)
-    if match:
-        lark_bitable_app_token = match.group(1)
-        lark_bitable_table_id = match.group(2)
-        logger.debug("app_id =", lark_bitable_app_token)
-        logger.debug("lark_bitable_table_id =", lark_bitable_table_id)
-    else:
-        logger.error("Invalid Lark Bitable URL format.")
-        return
+    lark_bitable_app_token, lark_bitable_table_id = extract_params_from_url(
+        table_url)
 
     logger.info("Creating client for Lark API.")
     with yaspin(text="", spinner="dots") as spinner:
@@ -670,7 +656,7 @@ def update_from_table(table_url: str,
         client = lark.Client.builder() \
             .app_id(lark.APP_ID) \
             .app_secret(lark.APP_SECRET) \
-            .log_level(lark.LogLevel.INFO) \
+            .log_level(LARK_LOG_LEVEL) \
             .build()
         spinner.ok("✅ Done")
 
@@ -700,15 +686,6 @@ def update_from_table(table_url: str,
             lark.logger.debug(
                 f"Fetched {len(response.data.items)} records from the table.")
 
-            def extract_text(obj, d):
-                if obj.get(d):
-                    if isinstance(obj[d], str):
-                        return obj[d]
-                    else:
-                        return obj[d][0]['text']
-                else:
-                    return None
-
             for record in response.data.items:
                 db["invoices"].update(
                     extract_text(record.fields, 'file_token'), {
@@ -721,6 +698,274 @@ def update_from_table(table_url: str,
                 break
             page_token = response.data.page_token
         spinner.ok("✅ Done")
+
+
+def sync_to_table(table_url: str, db_path: str = "invoices.db"):
+    """
+    同步数据 方向 本地数据库->远程云文档
+    """
+    db = Database(db_path)
+    lark_bitable_app_token, lark_bitable_table_id = extract_params_from_url(
+        table_url)
+
+    logger.info("Creating client for Lark API.")
+    with yaspin(text="", spinner="dots") as spinner:
+        # 延迟导入 lark_oapi，提高主程序启动速度
+        import lark_oapi as lark
+        import lark_oapi.api.drive.v1 as drive_v1
+        import lark_oapi.api.bitable.v1 as bitable_v1
+
+        if not (lark.APP_ID and lark.APP_SECRET):
+            logger.error(
+                "Lark APP_ID and APP_SECRET are not set. Please check file .env for LARK_APP_ID and LARK_APP_SECRET."
+            )
+            return
+        client = lark.Client.builder() \
+            .app_id(lark.APP_ID) \
+            .app_secret(lark.APP_SECRET) \
+            .log_level(LARK_LOG_LEVEL) \
+            .build()
+        spinner.ok("✅ Done")
+
+    logger.info("Fetching table records.")
+    with yaspin(text="", spinner="dots") as spinner:
+        page_token = ""
+        record_ids = {}
+        while True:
+            request: bitable_v1.SearchAppTableRecordRequest = bitable_v1.SearchAppTableRecordRequest.builder() \
+                .app_token(lark_bitable_app_token) \
+                .table_id(lark_bitable_table_id) \
+                .page_token(page_token) \
+                .page_size(100) \
+                .request_body(bitable_v1.SearchAppTableRecordRequestBody.builder()
+                        .build()) \
+                .build()
+
+            response: bitable_v1.SearchAppTableRecordResponse = client.bitable.v1.app_table_record.search(
+                request)
+
+            if not response.success():
+                lark.logger.error(
+                    f"client.bitable.v1.app_table_record.search failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}"
+                )
+                return
+
+            record_ids = record_ids | {
+                extract_text(record.fields, 'file_token'): record.record_id
+                for record in response.data.items
+            }
+            lark.logger.debug(
+                f"Fetched {len(record_ids)} record_ids from the table.")
+
+            if not response.data.has_more:
+                break
+            page_token = response.data.page_token
+        spinner.ok("✅ Done")
+
+    logger.info("Updating invoices data.")
+    with yaspin(text="", spinner="dots") as spinner:
+        # get invoices data
+        keys = ("file_token", "type", "number", "date", "buyerTaxID",
+                "buyerName", "sellerTaxID", "sellerName", "items_brief",
+                "items_unit", "remark", "item_num", "total_items_num",
+                "totalAmount", "error_message", "items", "status")
+        result = db.execute(
+            f"SELECT {', '.join(keys)} FROM invoices").fetchall()
+        invoices_data = [{
+            key: row[index]
+            for index, key in enumerate(keys)
+        } for row in result]
+
+        # format all invoices data
+        for invoice_data in invoices_data:
+            for key, type_value in table_fields_type_map.items():
+                if key in invoice_data:
+                    value = invoice_data[key]
+
+                    if value in (None, '', [], {}, ()):
+                        del invoice_data[key]
+                        continue
+
+                    if type_value == 2:
+                        invoice_data[key] = int(value)
+                    elif type_value == 3:
+                        invoice_data[key] = str(value)
+
+        # add uploader and belonger data
+        result = db.execute(f"""
+            SELECT
+                json_extract(records.{UPLOADER_COLUMN_NAME}, '$[0].id') AS uploader_id,
+                json_extract(records.{BELONGER_COLUMN_NAME}, '$[0].id') AS belonger_id,
+                json_extract(value, '$.file_token') AS file_token
+            FROM records, json_each(records.{INVOICE_COLUMN_NAME})
+        """).fetchall()
+
+        invoices_by_token = {
+            data['file_token']: data
+            for data in invoices_data
+        }
+        for row in result:
+            file_token = row[2]
+            if file_token in invoices_by_token:
+                invoice_data = invoices_by_token[file_token]
+                if row[0]:
+                    invoice_data['uploader'] = [{"id": row[0], "type": "user"}]
+                if row[1]:
+                    invoice_data['belonger'] = [{"id": row[1], "type": "user"}]
+
+        update_records = []
+        insert_records = []
+        for data in invoices_data:
+            if data['file_token'] in record_ids:
+                update_records.append({
+                    "fields": {
+                        "error_message": data.get('error_message'),
+                        "status": data.get('status'),
+                    },
+                    "record_id":
+                    record_ids[data['file_token']]
+                })
+            else:
+                insert_records.append({"fields": data})
+
+        # try upate to bitable table
+        BATCH_SIZE = 1000
+        while update_records:
+            batch = update_records[:BATCH_SIZE]
+            request: bitable_v1.BatchUpdateAppTableRecordRequest = bitable_v1.BatchUpdateAppTableRecordRequest.builder() \
+                .app_token(lark_bitable_app_token) \
+                .table_id(lark_bitable_table_id) \
+                .request_body(bitable_v1.BatchUpdateAppTableRecordRequestBody.builder()
+                    .records(batch)
+                    .build()) \
+                .build()
+            response: bitable_v1.BatchUpdateAppTableRecordResponse = client.bitable.v1.app_table_record.batch_update(
+                request)
+            if not response.success():
+                lark.logger.error(
+                    f"client.bitable.v1.app_table_record.batch_update failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}, resp: \n{json.dumps(json.loads(response.raw.content), indent=4, ensure_ascii=False)}"
+                )
+                return
+            update_records = update_records[BATCH_SIZE:]
+
+        # Insert invoice records that do not exist in the table
+        while insert_records:
+            batch = insert_records[:BATCH_SIZE]
+            request: bitable_v1.BatchCreateAppTableRecordRequest = bitable_v1.BatchCreateAppTableRecordRequest.builder() \
+                .app_token(lark_bitable_app_token) \
+                .table_id(lark_bitable_table_id) \
+                .ignore_consistency_check(True) \
+                .request_body(bitable_v1.BatchCreateAppTableRecordRequestBody.builder()
+                    .records(batch)
+                    .build()) \
+                .build()
+            response: bitable_v1.BatchCreateAppTableRecordResponse = client.bitable.v1.app_table_record.batch_create(
+                request)
+            if not response.success():
+                lark.logger.error(
+                    f"client.bitable.v1.app_table_record.batch_create failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}, resp: \n{json.dumps(json.loads(response.raw.content), indent=4, ensure_ascii=False)}"
+                )
+                return
+            insert_records = insert_records[BATCH_SIZE:]
+        spinner.ok("✅ Done")
+
+
+def auto_sync(table_url: str, db_path: str = "invoices.db"):
+    """
+    根据修改时间自动选择同步方向
+    """
+    db = Database(db_path)
+    lark_bitable_app_token, lark_bitable_table_id = extract_params_from_url(
+        table_url)
+
+    logger.info("Creating client for Lark API.")
+    with yaspin(text="", spinner="dots") as spinner:
+        # 延迟导入 lark_oapi，提高主程序启动速度
+        import lark_oapi as lark
+        import lark_oapi.api.drive.v1 as drive_v1
+        import lark_oapi.api.bitable.v1 as bitable_v1
+
+        if not (lark.APP_ID and lark.APP_SECRET):
+            logger.error(
+                "Lark APP_ID and APP_SECRET are not set. Please check file .env for LARK_APP_ID and LARK_APP_SECRET."
+            )
+            return
+        client = lark.Client.builder() \
+            .app_id(lark.APP_ID) \
+            .app_secret(lark.APP_SECRET) \
+            .log_level(LARK_LOG_LEVEL) \
+            .build()
+        spinner.ok("✅ Done")
+
+    logger.info(
+        "Comparing local and remote revision to determine sync direction.")
+    with yaspin(text="", spinner="dots") as spinner:
+        remote_revision = ""
+        local_record_revision = ""
+        result = ""
+
+        # fetch remote revision
+        def fetch_remote_revision():
+            page_token = ""
+            while remote_revision == "":
+                request: bitable_v1.ListAppTableRequest = bitable_v1.ListAppTableRequest.builder() \
+                    .app_token(lark_bitable_app_token) \
+                    .page_token(page_token) \
+                    .page_size(100) \
+                    .build()
+                response: bitable_v1.ListAppTableResponse = client.bitable.v1.app_table.list(
+                    request)
+                if not response.success():
+                    lark.logger.error(
+                        f"client.bitable.v1.app_table.list failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}, resp: \n{json.dumps(json.loads(response.raw.content), indent=4, ensure_ascii=False)}"
+                    )
+                    return
+
+                table_info = next(
+                    (table_info for table_info in response.data.items
+                     if table_info.table_id == lark_bitable_table_id), None)
+                if table_info:
+                    return table_info.revision
+                if not response.data.has_more:
+                    logger.exception('cannot fetch remote table revision.')
+                page_token = response.data.page_token
+
+        remote_revision = fetch_remote_revision()
+        logger.debug(f'remote_revision is {remote_revision}')
+        # fetch local revision
+        try:
+            local_record_revision = db['remote_table_revision'].get(
+                lark_bitable_table_id).get('value')
+        except Exception:
+            db['remote_table_revision'].insert(
+                {
+                    "table_id": lark_bitable_table_id,
+                    "value": 0,
+                },
+                pk="table_id")
+            local_record_revision = 0
+        logger.debug(f'local_record_revision is {local_record_revision}')
+
+        # compare local and remote revision
+        if local_record_revision > remote_revision:
+            result = "sync_to_table"
+        else:
+            result = "sync_from_table"
+
+        spinner.ok("✅ Done")
+
+    # write current revision to database
+    if result == "sync_to_table":
+        logger.info('Select sync_to_table.')
+        sync_to_table(table_url, db_path)
+        remote_revision = fetch_remote_revision()
+        db['remote_table_revision'].update(lark_bitable_table_id,
+                                           {"value": remote_revision})
+    elif result == "sync_from_table":
+        logger.info('Select sync_from_table.')
+        sync_from_table(table_url, db_path)
+        db['remote_table_revision'].update(lark_bitable_table_id,
+                                           {"value": remote_revision})
 
 
 def main():
@@ -742,15 +987,24 @@ def main():
                               action="store_true",
                               help="启用备用解析服务（当主解析失败时）")
 
-    # 子命令：update
-    update_parser = subparsers.add_parser("update", help="同步 云文档 内发票状态")
-    update_parser.add_argument("--url",
-                               metavar="lark bitable url",
-                               required=True,
-                               help="(飞书)用于报销统计的多维表格数据表链接(需包含table参数)")
-    update_parser.add_argument("--db",
-                               default="invoices.db",
-                               help="SQLite 数据库路径")
+    # 子命令：sync
+    sync_parser = subparsers.add_parser(
+        "sync",
+        help="同步 云文档 内发票状态",
+        description="同步 云文档 内发票状态(默认根据修改时间判断同步方向)")
+    sync_parser.add_argument("--url",
+                             metavar="lark bitable url",
+                             required=True,
+                             help="(飞书)用于报销统计的多维表格数据表链接(需包含table参数)")
+
+    sync_parser.add_argument(
+        "--force",
+        choices=["database", "table"],
+        help="指定同步方向 [database: 将本地数据同步到云文档 | table: 将云文档数据同步到本地]")
+
+    sync_parser.add_argument("--db",
+                             default="invoices.db",
+                             help="SQLite 数据库路径")
 
     # 子命令：create
     create_parser = subparsers.add_parser("create", help="创建 云文档 并上传数据库内的发票信息")
@@ -783,10 +1037,15 @@ def main():
         fetch_from_table(args.url, args.db, args.fallback)
     elif args.command == "export":
         export_to_local_document(args.db, args.target)
-    elif args.command == "update":
-        update_from_table(args.url, args.db, use_fallback=False)
+    elif args.command == "sync":
+        if args.force == "database":
+            sync_to_table(args.url, args.db)
+        elif args.force == "table":
+            sync_from_table(args.url, args.db)
+        else:
+            auto_sync(args.url, args.db)
     elif args.command == "create":
-        create_lark_app_table_(args.url, args.db)
+        create_lark_app_table(args.url, args.db)
     elif args.command == "recheck":
         recheck_invoices(args.db)
 
