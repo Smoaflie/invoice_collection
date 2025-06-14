@@ -14,7 +14,7 @@ from core.invoice.baidu_ocr import BaiduOCR
 from sqlite_utils import Database
 from tqdm import tqdm
 from yaspin import yaspin
-from custom_rule import vertify_invoice
+import custom_rule
 
 UPLOADER_COLUMN_NAME = "创建人"
 BELONGER_COLUMN_NAME = "收款人"
@@ -276,7 +276,7 @@ def fetch_from_bitable(bitable_url: str,
         for invoice_data in tqdm(invoices_data, desc="Verifying invoices"):
             try:
                 invoice = Invoice(invoice_data)
-                verification_result = vertify_invoice(invoice)
+                verification_result = custom_rule.vertify_invoice(invoice)
 
                 if verification_result["status"] == "error":
                     logger.debug(
@@ -591,8 +591,6 @@ def create_lark_app_table_(bitable_url: str, db_path: str = "invoices.db"):
 
         records = [{"fields": data} for data in invoices_data]
 
-        with open("tmp.json", "w") as f:
-            f.write(json.dumps(records, indent=4, ensure_ascii=False))
         # try insert to bitable table
         BATCH_SIZE = 1000
         while records:
@@ -613,6 +611,37 @@ def create_lark_app_table_(bitable_url: str, db_path: str = "invoices.db"):
                 )
                 return
             records = records[BATCH_SIZE:]
+        spinner.ok("✅ Done")
+
+
+def recheck_invoices(db_path: str = "invoices.db"):
+    db = Database(db_path)
+    logger.info("Verifying invoice data with custom rules...")
+    with yaspin(text="", spinner="dots") as spinner:
+        invoices_data = db["invoices"].rows_where("processed = ?", (True, ))
+        for invoice_data in tqdm(invoices_data, desc="Verifying invoices"):
+            try:
+                invoice = Invoice(invoice_data)
+                verification_result = custom_rule.vertify_invoice(invoice)
+
+                if verification_result["status"] == "error":
+                    logger.debug(
+                        f"Verification failed for file {invoice_data['file_token']}: {verification_result['message']}"
+                    )
+                    db["invoices"].update(
+                        invoice_data['file_token'], {
+                            "error_message": verification_result["message"],
+                            "status": '-2'
+                        })
+                else:
+                    logger.debug(
+                        f"Verification passed for file {invoice_data['file_token']}."
+                    )
+            except Exception as e:
+                logger.error(
+                    f"Error verifying file {invoice_data['file_token']}: {str(e)}"
+                )
+
         spinner.ok("✅ Done")
 
 
@@ -664,6 +693,13 @@ def main():
 
     export_parser.add_argument("target", metavar="PATH", help="本地文件路径")
 
+    # 子命令：recheck
+    recheck_parser = subparsers.add_parser(
+        "recheck", help="再次对所有解析后的发票(processed)进行自定义校验")
+    recheck_parser.add_argument("--db",
+                                default="invoices.db",
+                                help="SQLite 数据库路径")
+
     args = parser.parse_args()
 
     if args.command == "fetch":
@@ -675,6 +711,8 @@ def main():
         # fetch_from_bitable(args.url, args.db, use_fallback=False)
     elif args.command == "create":
         create_lark_app_table_(args.url, args.db)
+    elif args.command == "recheck":
+        recheck_invoices(args.db)
 
 
 if __name__ == "__main__":
