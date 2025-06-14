@@ -22,9 +22,6 @@ INVOICE_COLUMN_NAME = "发票"
 TOTAL_AMOUNT_COLUMN_NAME = "审批后金额"
 APPROVAL_REMARKS_COLUMN_NAME = "审批备注"
 
-# TODO: 对表格的自定义规则
-# TODO: 标签系统(同自定义规则)
-
 
 def process_invoice_with_ocr(client, file_token: str, file_type: str,
                              base64_data: str, use_fallback: bool,
@@ -133,12 +130,11 @@ def process_invoice_with_ocr(client, file_token: str, file_type: str,
             insert_result({}, error_msg)
 
 
-def fetch_from_bitable(bitable_url: str,
-                       db_path: str = "invoices.db",
-                       use_fallback: bool = False):
+def fetch_from_table(table_url: str,
+                     db_path: str = "invoices.db",
+                     use_fallback: bool = False):
     db = Database(db_path)
-    match = re.search(r'/base/([a-zA-Z0-9]+)\?table=([a-zA-Z0-9]+)',
-                      bitable_url)
+    match = re.search(r'/base/([a-zA-Z0-9]+)\?table=([a-zA-Z0-9]+)', table_url)
     if match:
         lark_bitable_app_token = match.group(1)
         lark_bitable_table_id = match.group(2)
@@ -442,12 +438,12 @@ def export_to_local_document(db_path: str = "invoices.db",
     logger.info(f"All tables exported to {output_path}.")
 
 
-def create_lark_app_table_(bitable_url: str, db_path: str = "invoices.db"):
+def create_lark_app_table_(table_url: str, db_path: str = "invoices.db"):
     """
     (飞书)创建展示发票信息的数据表
     """
     db = Database(db_path)
-    match = re.search(r'/base/([a-zA-Z0-9]+)', bitable_url)
+    match = re.search(r'/base/([a-zA-Z0-9]+)', table_url)
     if match:
         lark_bitable_app_token = match.group(1)
         logger.debug("app_id =", lark_bitable_app_token)
@@ -645,6 +641,88 @@ def recheck_invoices(db_path: str = "invoices.db"):
         spinner.ok("✅ Done")
 
 
+def update_from_table(table_url: str,
+                      db_path: str = "invoices.db",
+                      use_fallback: bool = False):
+    db = Database(db_path)
+    match = re.search(r'/base/([a-zA-Z0-9]+)\?table=([a-zA-Z0-9]+)', table_url)
+    if match:
+        lark_bitable_app_token = match.group(1)
+        lark_bitable_table_id = match.group(2)
+        logger.debug("app_id =", lark_bitable_app_token)
+        logger.debug("lark_bitable_table_id =", lark_bitable_table_id)
+    else:
+        logger.error("Invalid Lark Bitable URL format.")
+        return
+
+    logger.info("Creating client for Lark API.")
+    with yaspin(text="", spinner="dots") as spinner:
+        # 延迟导入 lark_oapi，提高主程序启动速度
+        import lark_oapi as lark
+        import lark_oapi.api.drive.v1 as drive_v1
+        import lark_oapi.api.bitable.v1 as bitable_v1
+
+        if not (lark.APP_ID and lark.APP_SECRET):
+            logger.error(
+                "Lark APP_ID and APP_SECRET are not set. Please check file .env for LARK_APP_ID and LARK_APP_SECRET."
+            )
+            return
+        client = lark.Client.builder() \
+            .app_id(lark.APP_ID) \
+            .app_secret(lark.APP_SECRET) \
+            .log_level(lark.LogLevel.INFO) \
+            .build()
+        spinner.ok("✅ Done")
+
+    logger.info("Fetching records from the table...")
+    with yaspin(text="", spinner="dots") as spinner:
+        page_token = ""
+        # only need ["file_token", "status", "error_message"]
+        while True:
+            request: bitable_v1.SearchAppTableRecordRequest = bitable_v1.SearchAppTableRecordRequest.builder() \
+                .app_token(lark_bitable_app_token) \
+                .table_id(lark_bitable_table_id) \
+                .page_token(page_token) \
+                .page_size(100) \
+                .request_body(bitable_v1.SearchAppTableRecordRequestBody.builder()
+                        .build()) \
+                .build()
+
+            response: bitable_v1.SearchAppTableRecordResponse = client.bitable.v1.app_table_record.search(
+                request)
+
+            if not response.success():
+                lark.logger.error(
+                    f"client.bitable.v1.app_table_record.search failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}"
+                )
+                return
+
+            lark.logger.debug(
+                f"Fetched {len(response.data.items)} records from the table.")
+
+            def extract_text(obj, d):
+                if obj.get(d):
+                    if isinstance(obj[d], str):
+                        return obj[d]
+                    else:
+                        return obj[d][0]['text']
+                else:
+                    return None
+
+            for record in response.data.items:
+                db["invoices"].update(
+                    extract_text(record.fields, 'file_token'), {
+                        "error_message":
+                        extract_text(record.fields, 'error_message'),
+                        "status":
+                        extract_text(record.fields, 'status')
+                    })
+            if not response.data.has_more:
+                break
+            page_token = response.data.page_token
+        spinner.ok("✅ Done")
+
+
 def main():
     parser = argparse.ArgumentParser(description="发票处理脚本")
 
@@ -665,8 +743,7 @@ def main():
                               help="启用备用解析服务（当主解析失败时）")
 
     # 子命令：update
-    update_parser = subparsers.add_parser("update",
-                                          help="同步 云文档 内发票状态，并上传数据库新增的发票信息")
+    update_parser = subparsers.add_parser("update", help="同步 云文档 内发票状态")
     update_parser.add_argument("--url",
                                metavar="lark bitable url",
                                required=True,
@@ -703,12 +780,11 @@ def main():
     args = parser.parse_args()
 
     if args.command == "fetch":
-        fetch_from_bitable(args.url, args.db, args.fallback)
+        fetch_from_table(args.url, args.db, args.fallback)
     elif args.command == "export":
         export_to_local_document(args.db, args.target)
     elif args.command == "update":
-        pass
-        # fetch_from_bitable(args.url, args.db, use_fallback=False)
+        update_from_table(args.url, args.db, use_fallback=False)
     elif args.command == "create":
         create_lark_app_table_(args.url, args.db)
     elif args.command == "recheck":
