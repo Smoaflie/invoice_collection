@@ -48,7 +48,6 @@ def process_invoice_with_ocr(client, file_token: str, file_type: str,
     import lark_oapi as lark
     import lark_oapi.api.drive.v1 as drive_v1
     client: lark.Client = client
-    print(1)
 
     def perform_ocr(method: str):
         if "image" in file_type:
@@ -972,8 +971,11 @@ def group_invoices(file_path, db_path: str = "invoices.db"):
         try:
             key: str = request['key']
             target: dict = request['target']
+            like_match: bool = request.get('like_match', False)
+            case_insensitive: bool = request.get('case_insensitive', True)
             if not isinstance(key, str) or not isinstance(target, dict):
                 raise ValueError('key or target has wrong type.')
+            logger.debug(f'group key:{key}, like_match:{like_match}, case_insensitive:{case_insensitive}')
         except Exception:
             logger.exception("传入的参数文件格式错误，请检查 JSON 格式或字段内容")
 
@@ -981,8 +983,11 @@ def group_invoices(file_path, db_path: str = "invoices.db"):
 
     logger.info('Updating invoices data.')
     with yaspin(text="", spinner="dots") as spinner:
+        if not case_insensitive:
+            db.execute("PRAGMA case_sensitive_like = ON")
         for key_word, status in target.items():
-            db.execute(f"UPDATE invoices SET status = ? WHERE {key} = ?",
-                       (status, key_word))
+            value = f"%{key_word}%" if like_match else key_word
+            db.execute(f"UPDATE invoices SET status = ? WHERE {key} LIKE ?",
+                    (status, value))
         db.conn.commit()
         spinner.ok("✅ Done")
