@@ -1,0 +1,15 @@
+__pycache__
+
+.venv
+.env
+
+*.log
+*.csv
+*.db
+*.txt
+*.xlsx
+*.json
+
+!requirements.txt
+
+output
