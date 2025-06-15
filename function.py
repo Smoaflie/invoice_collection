@@ -1024,10 +1024,10 @@ def group_invoices(file_path, db_path: str = "invoices.db"):
             request = json.loads(f.read())
         try:
             key: str = request['key']
-            target: dict = request['target']
+            target: list = request['target']
             like_match: bool = request.get('like_match', False)
             case_insensitive: bool = request.get('case_insensitive', True)
-            if not isinstance(key, str) or not isinstance(target, dict):
+            if not isinstance(key, str) or not isinstance(target, list):
                 raise ValueError('key or target has wrong type.')
             logger.debug(f'group key:{key}, like_match:{like_match}, case_insensitive:{case_insensitive}')
         except Exception:
@@ -1039,9 +1039,10 @@ def group_invoices(file_path, db_path: str = "invoices.db"):
     with yaspin(text="", spinner="dots") as spinner:
         if not case_insensitive:
             db.execute("PRAGMA case_sensitive_like = ON")
-        for key_word, status in target.items():
-            value = f"%{key_word}%" if like_match else key_word
-            db.execute(f"UPDATE invoices SET status = ? WHERE {key} LIKE ?",
-                    (status, value))
+        for data in target:
+            for key_word, status in data.items():
+                value = f"%{key_word}%" if like_match else key_word
+                db.execute(f"UPDATE invoices SET status = ? WHERE {key} LIKE ?",
+                        (status, value))
         db.conn.commit()
         spinner.ok("✅ Done")

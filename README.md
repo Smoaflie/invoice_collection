@@ -47,14 +47,17 @@
 - 创建发票信息云文档 / 同步全部发票信息到云文档
 
 - 自定义发票标签（允许批量修改发票标签）
+  
+  - 配合项目 [发票二维码识别工具(分组工具)](https://github.com/Smoaflie/invoice_qrcode_decode) 食用更佳
+  
   <img src=".\static\images\show2.png" alt="image-20250615125741251" style="zoom:50%;" />
-
+  
 - 按不同的规则导出发票（允许多种规则并存，文件采用硬链接，不占据额外存储空间）
 
   - 注意：Windows系统中，仅NTFS的磁盘格式才支持硬链接
-  
+
   <img src=".\static\images\export.png" alt="image-20250615125741251" style="zoom:50%;" />
-  
+
 - 自定义导出规则
 
   <img src=".\static\images\custom_rule2.png" alt="image-20250615125741251" style="zoom:50%;" />
@@ -192,11 +195,9 @@ qq: 1373987167
 ### 鸣谢
 
 - [Best_README_template](https://github.com/shaojintian/Best_README_template)
-
-
 - [Img Shields](https://shields.io)
 - [Choose an Open Source License](https://choosealicense.com)
-
+- [Freepik](https://www.flaticon.com/authors/freepik) - The author of logo
 ### 版权说明
 
 该项目签署了MIT 授权许可，详情请参阅 [LICENSE](https://github.com/Smoaflie/invoice_collection/blob/master/LICENSE)

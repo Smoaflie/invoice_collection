@@ -2,26 +2,21 @@
     "key": "file_token",    # 关键字 对应表"invoices"中的列名
     "like_match": false,    # (可选)开启模糊匹配 默认值false
     "case_insensitive": true,  # (可选)忽略大小写 默认值true
-    "target": {             # 发票配置字典 对应关系{关键字段值}: {目标状态值}
-        "OkZ1bcvgtoJ42ExDDzoc2d7OnYc": "2155854",
-        "YW05bx4Fcog46GxidNncvYVUnHd": "2155854",
-        "WdFIb8HGEoqRUJxmddfcg016ntd": "2155854",
-        "GlU3bKcG8ovzEpxR96AccgkCnQG": "2155854",
-        "MtfubGoJ8oBuh4xaXe9cGZy2nvg": "2155854",
-        "Ju6IbCDpHoe5ZcxCunqciHr5n0f": "2155854",
-        "J1vpbRNqpoudoKxKEuAcBDOKnIg": "2155854",
-        "QSq0bpkTxo7PgdxTikGcWmDknKf": "2155854",
-        "Gij9bdZMFoaTKoxgJ0ZcFQVtnJd": "2155854",
-        "SuYPbpQ1Lo7W16xAV5Cc2PMmn9c": "2155854",
-        "S38Kbv3zSoTTRXxcz9Yci5GKnob": "2155854",
-        "Ou1Ebf488o01iJxtxvicga4GnNc": "2155854",
-        "IAsYbv2zfoctIrxxALWcFVNsnjr": "2155854",
-        "IXx8b1r4RoQd7cxZBRncF9hdn6g": "2155854",
-        "KfSPbHYzeoinpKx4nQPcr974nac": "2155854",
-        "ZWtJb7IA7oOPPvxEbMFclwuMnth": "2155854",
-        "JJzib432loYZfQxhfylcHnXTnoc": "2155854",
-        "P3cRbUPxJosyGixz09dcHsCxnkb": "2155854",
-        "THBzbNuzRo4diQxRUc1cAVqNnEf": "2155854",
-        "OseUbZw1gof3Rcx5Qnuc33einmf": "2155854"
-    }
+    "target": [             # 发票配置列表 List(dict) 对应关系{关键字段值}: {目标状态值}
+        {
+            "GFTCbcA6doL8tkxIFl0cfR7Rnue": "history_invoice",
+            "CoE2bvKRxoId2lxbAyQcClKvnLg": "history_invoice"
+        },
+        {
+            "WiFFbOTYuoGvolxj0TKcktkTnqd": "history_invoice",
+            "TfkzbU55FoDr0ixHKqkcdYbQnfc": "history_invoice",
+            "Jcc1bmr19oF3jBxzJgxc8HignGd": "history_invoice",
+            "JNtYbrIWeomWvgxOfGUcRvtsnMe": "history_invoice",
+            "CVrcblO2SoTmZLxiZl3cz3hSnBd": "history_invoice",
+            "JPwrb4mBSoxy5sxwMfEccBRRnDc": "history_invoice",
+            "BoctbBotzo0cZrxWeYqcadotnRg": "history_invoice",
+            "Fjrgbv0BNo47pPxxuh3ce9CYnV7": "history_invoice",
+            "ZhTMb5rbzo9fYMxSbmLcYFYunOh": "history_invoice"
+        }
+    ]
 }
