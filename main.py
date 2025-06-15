@@ -14,7 +14,7 @@ def main():
     # 子命令：fetch
     fetch_parser = subparsers.add_parser("fetch", help="从 收集表 提取表格信息并更新数据库")
     fetch_parser.add_argument("--url",
-                              metavar="lark bitable url",
+                              metavar="{lark bitable url}",
                               required=True,
                               help="(飞书)用于报销统计的多维表格数据表链接(需包含table参数)")
     fetch_parser.add_argument("--db",
@@ -31,7 +31,7 @@ def main():
         help="同步 云文档 内发票状态",
         description="同步 云文档 内发票状态(默认根据修改时间判断同步方向)")
     sync_parser.add_argument("--url",
-                             metavar="lark bitable url",
+                             metavar="{lark bitable url}",
                              required=True,
                              help="(飞书)用于报销统计的多维表格数据表链接(需包含table参数)")
 
@@ -47,7 +47,7 @@ def main():
     # 子命令：create
     create_parser = subparsers.add_parser("create", help="创建 云文档 并上传数据库内的发票信息")
     create_parser.add_argument("--url",
-                               metavar="lark bitable url",
+                               metavar="{lark bitable url}",
                                required=True,
                                help="(飞书)用于报销统计的多维表格链接")
     create_parser.add_argument("--db",
@@ -55,7 +55,7 @@ def main():
                                help="SQLite 数据库路径")
 
     # 子命令：export
-    export_parser = subparsers.add_parser("export", help="从数据库导出电子文档")
+    export_parser = subparsers.add_parser("export", help="导出数据库内容到本地")
     export_parser.add_argument("--db",
                                default="invoices.db",
                                help="SQLite 数据库路径")

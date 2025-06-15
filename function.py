@@ -455,7 +455,7 @@ def create_lark_app_table(table_url: str, db_path: str = "invoices.db"):
     (飞书)创建展示发票信息的数据表
     """
     db = Database(db_path)
-    lark_bitable_app_token, _ = extract_params_from_url(table_url)
+    lark_bitable_app_token, _ = extract_params_from_url(table_url, need_table_id = False)
 
     logger.info("Creating client for Lark API.")
     with yaspin(text="", spinner="dots") as spinner:
