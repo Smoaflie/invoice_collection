@@ -139,12 +139,12 @@
 >
 >   格式: 
 >
->   - 如果多维表格的 URL 以 **feishu.cn/base** 开头，该多维表格的 app_token 是下图高亮部分：![app_token.png](.\static\images\app_token.png)
+>   - 如果多维表格的 URL 以 **feishu.cn/base** 开头，该多维表格的 app_token 是下图高亮部分：![app_token.png](/static/images/app_token.png)
 >   - 如果多维表格的 URL 以 **feishu.cn/wiki** 开头，你需调用知识库相关[获取知识空间节点信息](https://open.feishu.cn/document/ukTMukTMukTM/uUDN04SN0QjL1QDN/wiki-v2/space/get_node)接口获取多维表格的 app_token。当 obj_type 的值为 bitable 时，obj_token 字段的值才是多维表格的 app_token。
 >
 >   以 **feishu.cn/base** 开头的url获取办法:
 >
->   ![lark_bitable_url](.\static\images\lark_bitable_url.png)
+>   ![lark_bitable_url](/static/images/lark_bitable_url.png)
 
 
 
@@ -199,7 +199,7 @@ qq: 1373987167
 
 ### 版权说明
 
-该项目签署了MIT 授权许可，详情请参阅 [LICENSE.txt](https://github.com/Smoaflie/invoice_collection/blob/master/LICENSE.txt)
+该项目签署了MIT 授权许可，详情请参阅 [LICENSE](https://github.com/Smoaflie/invoice_collection/blob/master/LICENSE)
 
 
 
