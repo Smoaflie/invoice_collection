@@ -3,7 +3,7 @@ import requests
 import urllib.parse
 import re
 from .base import *
-
+from ..log import logger
 BAIDU_API_KEY = os.getenv("BAIDU_API_KEY")
 BAIDU_SECRET_KEY = os.getenv("BAIDU_SECRET_KEY")
 
@@ -230,10 +230,24 @@ class BaiduOCR(object):
 
         return invoice
 
+    def send(method, url, headers, data):
+        response = requests.request(method,
+                                        url,
+                                        headers=headers,
+                                        data=data)
+        if response.json().get('error_code'):
+            if response.json().get('error_code') == 17:
+                logger.error('百度OCR接口额度已耗尽，请更换接口.')
+                exit()
+            else:
+                logger.error(f'百度OCR接口错误: {response.json()}')
+                exit()
+        return response
+
     @staticmethod
     def vat_invoice_recognition(file_type: str, base64_data) -> Invoice:
         """
-        增值税发票识别
+        增值税发票识别 免费接口1000次/月
 
         doc: https://cloud.baidu.com/doc/OCR/s/nk3h7xy2t
         """
@@ -252,19 +266,18 @@ class BaiduOCR(object):
             pdf_page = 1
             while pdf_page < pdf_page_max:
                 payload = f"pdf_file={urllib.parse.quote_plus(base64_data)}&pdf_file_num={pdf_page}&seal_tag=false"
-                response = requests.request("POST",
+                response = BaiduOCR.send("POST",
                                             url,
                                             headers=headers,
                                             data=payload.encode("utf-8"))
                 page = response.json()
-
                 pdf_page += 1
                 pdf_page_max = min(pdf_page_max,
                                    int(page.get("pdf_file_size")))
                 results.append(page["words_result"])
         elif file_type == "image":
             payload = f"image={urllib.parse.quote_plus(base64_data)}&seal_tag=false"
-            response = requests.request("POST",
+            response = BaiduOCR.send("POST",
                                         url,
                                         headers=headers,
                                         data=payload.encode("utf-8"))
@@ -279,7 +292,7 @@ class BaiduOCR(object):
     @staticmethod
     def multiple_invoice_recognition(file_type: str, base64_data) -> Invoice:
         """
-        智能财务票据识别
+        智能财务票据识别 免费接口50次/月
 
         doc: https://cloud.baidu.com/doc/OCR/s/7ktb8md0j
         """
@@ -298,7 +311,7 @@ class BaiduOCR(object):
             pdf_page = 1
             while pdf_page < pdf_page_max:
                 payload = f"pdf_file={urllib.parse.quote_plus(base64_data)}&pdf_file_num={pdf_page}&seal_tag=false"
-                response = requests.request("POST",
+                response = BaiduOCR.send("POST",
                                             url,
                                             headers=headers,
                                             data=payload.encode("utf-8"))
@@ -311,7 +324,7 @@ class BaiduOCR(object):
                 results.append(page["words_result"][0]['result'])
         elif file_type == "image":
             payload = f"image={urllib.parse.quote_plus(base64_data)}&seal_tag=false"
-            response = requests.request("POST",
+            response = BaiduOCR.send("POST",
                                         url,
                                         headers=headers,
                                         data=payload.encode("utf-8"))

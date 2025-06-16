@@ -1,12 +1,14 @@
 # --- load environment variables from .env file before importing anything using them
 import argparse
 from dotenv import load_dotenv
-from function import (fetch_from_table, export_to_local_path,
+
+def main():
+    load_dotenv()
+    
+    from function import (fetch_from_table, export_to_local_path,
                       create_lark_app_table, recheck_invoices, sync_from_table,
                       sync_to_table, auto_sync, group_invoices)
 
-
-def main():
     parser = argparse.ArgumentParser(description="发票处理脚本")
 
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -23,7 +25,10 @@ def main():
     fetch_parser.add_argument("--fallback",
                               default=False,
                               action="store_true",
-                              help="启用备用解析服务（当主解析失败时）")
+                              help="启用备用解析服务（目前仅百度OCR接口有备用解析服务）")
+    fetch_parser.add_argument("--interface",
+                              choices=["baidu", "tencent"],
+                              help="使用指定接口解析发票 [baidu | tencent]")
 
     # 子命令：sync
     sync_parser = subparsers.add_parser(
@@ -78,7 +83,7 @@ def main():
     args = parser.parse_args()
 
     if args.command == "fetch":
-        fetch_from_table(args.url, args.db, args.fallback)
+        fetch_from_table(args.url, args.db, args.fallback, args.interface)
     elif args.command == "export":
         export_to_local_path(args.db)
     elif args.command == "sync":
@@ -97,5 +102,4 @@ def main():
 
 
 if __name__ == "__main__":
-    load_dotenv()
     main()

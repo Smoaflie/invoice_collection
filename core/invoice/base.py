@@ -1,17 +1,39 @@
-from typing import List
+from typing import *
 
 
 class InvoiceItem:
+    _types = {
+        "name": "",
+        "type": "",
+        "unit": "",
+        "num": 0,
+        "unit_price": 0.0,
+        "amount": 0.0,
+        "tax_rate": "0.00%",
+        "tax": 0.0,
+    }
 
-    def __init__(self):
-        self.name = ""
-        self.type = ""
-        self.unit = ""
-        self.num = 0
-        self.unit_price = 0.0
-        self.amount = 0.0
-        self.tax_rate = "0.00%"
-        self.tax = 0.0
+    def __init__(self, data):
+        for key, default in self._types.items():
+            value = data.get(key, default) if data else default
+
+            try:
+                # 尝试转换数据类型
+                if isinstance(default,float):
+                    # 支持带百分号的税率字符串（如 "3.00%" → 0.03）
+                    if isinstance(value, str) and value.endswith("%"):
+                        value = float(value.strip('%')) / 100
+                    else:
+                        value = float(value)
+                elif isinstance(default, int):
+                    value = int(float(value))  # 有些值如 "5.0"
+                elif isinstance(default, str):
+                    value = str(value)
+                else:
+                    value = default
+            except (ValueError, TypeError):
+                value = default  # 转换失败时使用默认值
+            self.__setattr__(key, value)
 
     def set_name(self, name):
         self.name = name

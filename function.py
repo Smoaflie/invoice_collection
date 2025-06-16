@@ -5,11 +5,13 @@ from core import *
 from core.invoice import Invoice
 from core.log import LogLevel
 from core.invoice.baidu_ocr import BaiduOCR
+from core.invoice.tencent_ocr import TencentOCR
 from core.utils import extract_params_from_url, extract_text
 from sqlite_utils import Database
 from tqdm import tqdm
 from yaspin import yaspin
 import custom_rule
+from typing import Callable
 
 UPLOADER_COLUMN_NAME = "创建人"
 BELONGER_COLUMN_NAME = "收款人"
@@ -45,7 +47,7 @@ table_fields_type_map = {
 
 def process_invoice_with_ocr(client, file_token: str, file_type: str,
                              base64_data: str, use_fallback: bool,
-                             db: Database):
+                             db: Database, main_processor: Callable, fallback_processor: Callable):
     import lark_oapi as lark
     import lark_oapi.api.drive.v1 as drive_v1
     client: lark.Client = client
@@ -98,9 +100,10 @@ def process_invoice_with_ocr(client, file_token: str, file_type: str,
         return response.data.tmp_download_urls[0].tmp_download_url
 
     try:
-        ocr_result: Invoice = perform_ocr(BaiduOCR.vat_invoice_recognition)
+        ocr_result: Invoice = perform_ocr(main_processor)
 
         if not ocr_result.number or not ocr_result.totalAmount:
+            logger.info(ocr_result.data)
             raise ValueError("Missing required fields: number or totalAmount.")
 
         duplicate_token = check_duplicate(ocr_result.data.get('number'))
@@ -116,9 +119,9 @@ def process_invoice_with_ocr(client, file_token: str, file_type: str,
     except Exception as e:
         logger.warning(f"Primary OCR failed for file {file_token}: {e}")
 
-        if use_fallback:
+        if fallback_processor:
             try:
-                ocr_result = perform_ocr(BaiduOCR.multiple_invoice_recognition)
+                ocr_result = perform_ocr(fallback_processor)
 
                 if not ocr_result.number or not ocr_result.totalAmount:
                     raise ValueError(
@@ -143,7 +146,7 @@ def process_invoice_with_ocr(client, file_token: str, file_type: str,
                 error_msg = f"Fallback OCR failed: {e}"
                 insert_result({}, False, error_msg)
         else:
-            logger.error(
+            logger.exception(
                 f"File {file_token} could not be processed with primary OCR and fallback is disabled: {e}.\nPlease check the file: {get_file_tmp_download_url(file_token)}"
             )
             error_msg = f"This file cannot be processed: {e}"
@@ -152,7 +155,26 @@ def process_invoice_with_ocr(client, file_token: str, file_type: str,
 
 def fetch_from_table(table_url: str,
                      db_path: str = "invoices.db",
-                     use_fallback: bool = False):
+                     use_fallback: bool = False,
+                     interface: str = "baidu"):
+    # 检查是否有可用的api
+    main_processor: Callable = None
+    fallback_processor: Callable = None
+
+    if interface == 'baidu' and BaiduOCR.is_valid():
+        logger.info("Choose BaiduOCR API as processor.")
+        main_processor = BaiduOCR.vat_invoice_recognition
+        fallback_processor = BaiduOCR.multiple_invoice_recognition if use_fallback else None
+    elif interface == 'tencent' and TencentOCR.is_valid():
+        logger.info("Choose TencentOCR API as processor.")
+        main_processor = TencentOCR.multiple_invoice_recognition
+    else:
+        logger.error(
+            "Not valid API KEY. Please check file .env."
+        )
+        exit()
+        return
+
     db = Database(db_path)
     lark_bitable_app_token, lark_bitable_table_id = extract_params_from_url(
         table_url)
@@ -219,12 +241,6 @@ def fetch_from_table(table_url: str,
 
     logger.info("Processing invoice files...")
     if True:
-        if not BaiduOCR.is_valid():
-            logger.error(
-                "Baidu OCR API credentials are not set or invalid. Please check file .env for BAIDU_OCR_API_KEY and BAIDU_OCR_SECRET_KEY."
-            )
-            return
-
         logger.info("Collecting invoices files...")
         result = db.execute(
             f"""
@@ -277,7 +293,7 @@ def fetch_from_table(table_url: str,
 
             process_invoice_with_ocr(client, invoice_file['file_token'],
                                      invoice_file['type'], base64_data,
-                                     use_fallback, db)
+                                     use_fallback, db, main_processor, fallback_processor)
 
     logger.info("Verifying invoice data with custom rules...")
     with yaspin(text="", spinner="dots") as spinner:
