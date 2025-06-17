@@ -1,10 +1,9 @@
 import re
 from .log import logger
 
-
 def extract_params_from_url(url: str, need_table_id = True):
     if need_table_id:
-        match = re.search(r'/([a-zA-Z0-9]+)\?table=([a-zA-Z0-9]+)', url)
+        match = re.search(r'base/([a-zA-Z0-9]+)\?table=([a-zA-Z0-9]+)', url)
         if match:
             lark_bitable_app_token = match.group(1)
             lark_bitable_table_id = match.group(2)
@@ -14,7 +13,7 @@ def extract_params_from_url(url: str, need_table_id = True):
         else:
             logger.exception("Invalid Lark Bitable URL format.")
     else:
-        match = re.search(r'/([a-zA-Z0-9]+)', url)
+        match = re.search(r'base/([a-zA-Z0-9]+)', url)
         if match:
             lark_bitable_app_token = match.group(1)
             logger.debug("app_id =", lark_bitable_app_token)

@@ -12,6 +12,7 @@ from tqdm import tqdm
 from yaspin import yaspin
 import custom_rule
 from typing import Callable
+from i18n import I18n
 
 UPLOADER_COLUMN_NAME = "创建人"
 BELONGER_COLUMN_NAME = "收款人"
@@ -20,6 +21,8 @@ TOTAL_AMOUNT_COLUMN_NAME = "审批后金额"
 APPROVAL_REMARKS_COLUMN_NAME = "审批备注"
 
 LARK_LOG_LEVEL = LogLevel.INFO
+
+i18n = I18n(lang_code='zh_CN')
 
 table_fields_type_map = {
     "file_token": 1,  # 文本类型
@@ -209,7 +212,7 @@ def fetch_from_table(table_url: str,
                 .app_token(lark_bitable_app_token) \
                 .table_id(lark_bitable_table_id) \
                 .page_token(page_token) \
-                .page_size(100) \
+                .page_size(500) \
                 .request_body(bitable_v1.SearchAppTableRecordRequestBody.builder()
                         .build()) \
                 .build()
@@ -552,13 +555,13 @@ def create_lark_app_table(table_url: str, db_path: str = "invoices.db"):
             .app_token(lark_bitable_app_token) \
             .request_body(bitable_v1.CreateAppTableRequestBody.builder()
                 .table(bitable_v1.ReqTable.builder()
-                    .name("发票信息")
-                    .default_view_name("全部信息")
+                    .name(i18n.t("invoices_table_name"))
+                    .default_view_name(i18n.t("all_information"))
                     .fields([
-                        bitable_v1.AppTableCreateHeader.builder().field_name(field_name).type(type_value).property(bitable_v1.AppTableFieldProperty({"formatter": "0.00"})).build()
-                            if type_value == 2 else (bitable_v1.AppTableCreateHeader.builder().field_name(field_name).type(type_value).build()
+                        bitable_v1.AppTableCreateHeader.builder().field_name(i18n.t(field_name)).type(type_value).property(bitable_v1.AppTableFieldProperty({"formatter": "0.00"})).build()
+                            if type_value == 2 else (bitable_v1.AppTableCreateHeader.builder().field_name(i18n.t(field_name)).type(type_value).build()
                              if type_value != 3 else
-                             bitable_v1.AppTableCreateHeader.builder().field_name(field_name).type(type_value).property({"options": [
+                             bitable_v1.AppTableCreateHeader.builder().field_name(i18n.t(field_name)).type(type_value).property({"options": [
                                     {
                                         "name": "-2"
                                     },
@@ -638,7 +641,13 @@ def create_lark_app_table(table_url: str, db_path: str = "invoices.db"):
                 if row[1]:
                     invoice_data['belonger'] = [{"id": row[1], "type": "user"}]
 
-        records = [{"fields": data} for data in invoices_data]
+        # i18n support
+        records = []
+        for data in invoices_data:
+            fields = {}
+            for key,value in data.items():
+                fields[i18n.t(key)] = value
+            records.append({"fields":fields})
 
         # try insert to bitable table
         BATCH_SIZE = 1000
@@ -661,7 +670,6 @@ def create_lark_app_table(table_url: str, db_path: str = "invoices.db"):
                 return
             records = records[BATCH_SIZE:]
         spinner.ok("✅ Done")
-
 
 def recheck_invoices(db_path: str = "invoices.db"):
     db = Database(db_path)
@@ -730,7 +738,7 @@ def sync_from_table(table_url: str, db_path: str = "invoices.db"):
                 .app_token(lark_bitable_app_token) \
                 .table_id(lark_bitable_table_id) \
                 .page_token(page_token) \
-                .page_size(100) \
+                .page_size(500) \
                 .request_body(bitable_v1.SearchAppTableRecordRequestBody.builder()
                         .build()) \
                 .build()
@@ -749,11 +757,11 @@ def sync_from_table(table_url: str, db_path: str = "invoices.db"):
 
             for record in response.data.items:
                 db["invoices"].update(
-                    extract_text(record.fields, 'file_token'), {
+                    extract_text(record.fields, i18n.t('file_token')), {
                         "error_message":
-                        extract_text(record.fields, 'error_message'),
+                        extract_text(record.fields, i18n.t('error_message')),
                         "status":
-                        extract_text(record.fields, 'status')
+                        extract_text(record.fields, i18n.t('status'))
                     })
             if not response.data.has_more:
                 break
@@ -797,7 +805,7 @@ def sync_to_table(table_url: str, db_path: str = "invoices.db"):
                 .app_token(lark_bitable_app_token) \
                 .table_id(lark_bitable_table_id) \
                 .page_token(page_token) \
-                .page_size(100) \
+                .page_size(500) \
                 .request_body(bitable_v1.SearchAppTableRecordRequestBody.builder()
                         .build()) \
                 .build()
@@ -812,7 +820,7 @@ def sync_to_table(table_url: str, db_path: str = "invoices.db"):
                 return
 
             record_ids = record_ids | {
-                extract_text(record.fields, 'file_token'): record.record_id
+                extract_text(record.fields, i18n.t('file_token')): record.record_id
                 for record in response.data.items
             }
             lark.logger.debug(
@@ -876,18 +884,22 @@ def sync_to_table(table_url: str, db_path: str = "invoices.db"):
 
         update_records = []
         insert_records = []
+        # add i18n support 
         for data in invoices_data:
             if data['file_token'] in record_ids:
                 update_records.append({
                     "fields": {
-                        "error_message": data.get('error_message'),
-                        "status": data.get('status'),
+                        i18n.t("error_message"): data.get('error_message'),
+                        i18n.t("status"): data.get('status'),
                     },
                     "record_id":
                     record_ids[data['file_token']]
                 })
             else:
-                insert_records.append({"fields": data})
+                fields = {}
+                for key,value in data.items():
+                    fields[i18n.t(key)] = value
+                insert_records.append({"fields": fields})
 
         # try upate to bitable table
         BATCH_SIZE = 1000
@@ -972,7 +984,7 @@ def auto_sync(table_url: str, db_path: str = "invoices.db"):
                 request: bitable_v1.ListAppTableRequest = bitable_v1.ListAppTableRequest.builder() \
                     .app_token(lark_bitable_app_token) \
                     .page_token(page_token) \
-                    .page_size(100) \
+                    .page_size(500) \
                     .build()
                 response: bitable_v1.ListAppTableResponse = client.bitable.v1.app_table.list(
                     request)
